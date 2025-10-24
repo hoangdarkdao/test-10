@@ -29,7 +29,8 @@ task_map = {
 # Change variable here
 ALGORITHM_NAME = 'momcts'  # Could also be 'MEoH' or 'NSGA2'
 PROBLEM_NAME = "bi_cvrp" # Could also be "tsp_semo, bi_kp, bi_cvrp"
-exact_log_dir_name = "v20" # must be unique here
+exact_log_dir_name = "v16" # must be unique here
+
 
 if __name__ == '__main__':
     
@@ -37,8 +38,10 @@ if __name__ == '__main__':
     MethodClass, ProfilerClass = algorithm_map[ALGORITHM_NAME]
     TaskClass = task_map[PROBLEM_NAME]
     
+    API_KEY = os.getenv("MISTRAL_API_KEY") 
+        
     llm = MistralApi(
-        keys="b7uSUPCIevBX2vQ9pOr1m8qHsYodhZGd",
+        keys=API_KEY,
         model='codestral-latest',
         timeout=60
     )
