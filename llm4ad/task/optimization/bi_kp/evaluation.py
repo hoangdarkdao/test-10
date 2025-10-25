@@ -22,12 +22,12 @@ def knapsack_value(solution: np.ndarray, weight_lst: np.ndarray, value1_lst: np.
         return -1e10, -1e10
     total_val1 = np.sum(solution * value1_lst)
     total_val2 = np.sum(solution * value2_lst)
-    return total_val1, total_val2
+    return -total_val1, -total_val2  # Negate values for minimization
 
 
 def dominates(a, b):
-    """True if a dominates b (maximization)."""
-    return all(x >= y for x, y in zip(a, b)) and any(x > y for x, y in zip(a, b))
+    """True if a dominates b (minimization)."""
+    return all(x <= y for x, y in zip(a, b)) and any(x < y for x, y in zip(a, b))
 
 
 def random_solution(weight_lst, capacity, problem_size):
@@ -44,28 +44,23 @@ def random_solution(weight_lst, capacity, problem_size):
     return np.array([1 if i in selected_items else 0 for i in range(problem_size)])
 
 
-
-    
-
-
 def evaluate(instance_data, n_instance, problem_size, ref_point, capacity, eva: callable):
-    obj_1 = np.ones(n_instance)
-    obj_2 = np.ones(n_instance)
+    obj_1 = np.ones(n_instance) * 1e6  # Initialize with large values for minimization
+    obj_2 = np.ones(n_instance) * 1e6
     all_objs = []
     Archives = []
     n_ins = 0
-    times = []
     final_list = []
     
     for weight_lst, value1_lst, value2_lst in instance_data:
         start = time.time()
         s = [random_solution(weight_lst, capacity, problem_size) for _ in range(20)]
-        Archive = [(s_, knapsack_value(s_, weight_lst, value1_lst, value2_lst, capacity)) for s_ in s if knapsack_value(s_, weight_lst, value1_lst, value2_lst, capacity)[0] > -1e5]
+        Archive = [(s_, knapsack_value(s_, weight_lst, value1_lst, value2_lst, capacity)) for s_ in s if knapsack_value(s_, weight_lst, value1_lst, value2_lst, capacity)[0] > -1e10]
         for _ in range(8000):
             s_prime = np.array(eva(Archive, weight_lst, value1_lst, value2_lst, capacity))
             f_s_prime = knapsack_value(s_prime, weight_lst, value1_lst, value2_lst, capacity)
 
-            if f_s_prime[0] < -1e5:
+            if f_s_prime[0] < -1e10:
                 print("Here")
                 continue  # Skip infeasible
 
@@ -76,23 +71,11 @@ def evaluate(instance_data, n_instance, problem_size, ref_point, capacity, eva: 
         objs = np.array([obj for _, obj in Archive]) 
         Archives.append(objs)
         all_objs.append(objs)
-        times.append(end - start)
         
-    all_objs_concat = np.vstack(all_objs)
-    z_ideal = np.min(all_objs_concat, axis=0)
-    z_nadir = np.max(all_objs_concat, axis=0)
-    print(f"Z_ideal of the instance: {z_ideal}")
-    print(f"Z_nadir of the instance: {z_nadir}")
-    hv_indicator = Hypervolume(ref_point=ref_point,
-                                norm_ref_point=False, 
-                                zero_to_one=True,
-                                    ideal=z_ideal,
-                                    nadir=z_nadir)
-
-    for n_ins, (objs, t) in enumerate(zip(Archives, times)):
-        hv_value = hv_indicator(objs)
-        obj_1[n_ins] = -hv_value
-        obj_2[n_ins] = t
+    for n_ins, objs in enumerate(all_objs):
+        if len(objs) > 0:
+            obj_1[n_ins] = np.min(objs[:, 0])  # Min -value1 (negated for minimization)
+            obj_2[n_ins] = np.min(objs[:, 1])  # Min -value2 (negated for minimization)
         final_list.append(objs.tolist())
         
     return np.mean(obj_1), np.mean(obj_2)
@@ -132,8 +115,8 @@ def run_exec_and_eval(code_str, result_queue):
         exec(code_str, globals(), local_vars)
         select_neighbor_func = local_vars["select_neighbor"]
         tsp = BIKPEvaluation()
-        cst, tme = tsp.evaluate_program('_', select_neighbor_func)
-        result_queue.put([cst, tme])
+        cst1, cst2 = tsp.evaluate_program('_', select_neighbor_func)
+        result_queue.put([cst1, cst2])
     except Exception as e:
         result_queue.put(f"Error: {e}")
 
@@ -160,10 +143,5 @@ if __name__ == '__main__':
                 if isinstance(result, str) and result.startswith("Error"):
                     print(f"Error on code {k+1}: {result}")
                     continue
-                result[0] = result[0] / (45*45)
                 data[k]["score"] = result
                 print(f"Evaluating with code {k+1}...", result)
-
-
-
-
