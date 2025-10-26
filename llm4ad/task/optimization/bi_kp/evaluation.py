@@ -12,17 +12,23 @@ import time
 __all__ = ['BIKPEvaluation']
 
 
+PENALTY = 1e10  # large positive penalty for infeasible (since we minimize)
+
 def knapsack_value(solution: np.ndarray, weight_lst: np.ndarray, value1_lst: np.ndarray, value2_lst: np.ndarray, capacity: float):
-    if np.sum(solution * weight_lst) > capacity:
-        return -1e10, -1e10  # Penalize infeasible solutions
-    # check if the solution is feasible
-    if not np.all(np.isin(solution, [0, 1])):
-        return -1e10, -1e10
-    if len(solution) != len(weight_lst):
-        return -1e10, -1e10
-    total_val1 = np.sum(solution * value1_lst)
-    total_val2 = np.sum(solution * value2_lst)
-    return -total_val1, -total_val2  # Negate values for minimization
+    # ensure it's an array of ints 0/1
+    sol = np.asarray(solution).astype(int)
+    if len(sol) != len(weight_lst):
+        return PENALTY, PENALTY
+    # check 0/1
+    if not np.all(np.isin(sol, [0, 1])):
+        return PENALTY, PENALTY
+    total_weight = np.sum(sol * weight_lst)
+    if total_weight > capacity:
+        return PENALTY, PENALTY  # infeasible -> large positive penalty (bad)
+    total_val1 = np.sum(sol * value1_lst)
+    total_val2 = np.sum(sol * value2_lst)
+    # we negate values because we want minimization (more negative = better)
+    return -float(total_val1), -float(total_val2)
 
 
 def dominates(a, b):
@@ -45,39 +51,55 @@ def random_solution(weight_lst, capacity, problem_size):
 
 
 def evaluate(instance_data, n_instance, problem_size, ref_point, capacity, eva: callable):
-    obj_1 = np.ones(n_instance) * 1e6  # Initialize with large values for minimization
-    obj_2 = np.ones(n_instance) * 1e6
+    obj_1 = np.ones(n_instance) * PENALTY  # initialize with large (bad) values
+    obj_2 = np.ones(n_instance) * PENALTY
     all_objs = []
     Archives = []
-    n_ins = 0
     final_list = []
-    
-    for weight_lst, value1_lst, value2_lst in instance_data:
-        start = time.time()
-        s = [random_solution(weight_lst, capacity, problem_size) for _ in range(20)]
-        Archive = [(s_, knapsack_value(s_, weight_lst, value1_lst, value2_lst, capacity)) for s_ in s if knapsack_value(s_, weight_lst, value1_lst, value2_lst, capacity)[0] > -1e10]
+
+    for idx, (weight_lst, value1_lst, value2_lst) in enumerate(instance_data):
+        # init random seed if you want reproducibility
+        s_list = [random_solution(weight_lst, capacity, problem_size) for _ in range(20)]
+        Archive = []
+        # build initial archive, compute value once per solution
+        for s_ in s_list:
+            f = knapsack_value(s_, weight_lst, value1_lst, value2_lst, capacity)
+            if f[0] < PENALTY:  # feasible
+                Archive.append((np.asarray(s_, dtype=int), (f[0], f[1])))
+
+        # main loop: generate candidates via eva
         for _ in range(8000):
+            # ensure eva returns a 0/1 array of correct length
             s_prime = np.array(eva(Archive, weight_lst, value1_lst, value2_lst, capacity))
+            if s_prime.shape[0] != problem_size:
+                # invalid candidate, skip or raise
+                # skip for robustness
+                continue
             f_s_prime = knapsack_value(s_prime, weight_lst, value1_lst, value2_lst, capacity)
 
-            if f_s_prime[0] < -1e10:
-                print("Here")
-                continue  # Skip infeasible
+            # skip infeasible (penalized)
+            if f_s_prime[0] >= PENALTY:
+                # infeasible -> skip
+                continue
 
-            if not any(dominates(f_a, f_s_prime) for _, f_a in Archive):
-                Archive = [(a, f_a) for a, f_a in Archive if not dominates(f_s_prime, f_a)]
-                Archive.append((s_prime, f_s_prime))
-        end = time.time()
-        objs = np.array([obj for _, obj in Archive]) 
+            # check if any existing dominates the new one (minimization)
+            if any(dominates(f_a, f_s_prime) for _, f_a in Archive):
+                continue  # there exists an archive member that dominates s_prime
+
+            # remove archive members that are dominated by s_prime
+            Archive = [(a, f_a) for a, f_a in Archive if not dominates(f_s_prime, f_a)]
+            Archive.append((np.asarray(s_prime, dtype=int), (f_s_prime[0], f_s_prime[1])))
+
+        objs = np.array([obj for _, obj in Archive]) if len(Archive) > 0 else np.empty((0,2))
         Archives.append(objs)
         all_objs.append(objs)
-        
+
     for n_ins, objs in enumerate(all_objs):
-        if len(objs) > 0:
-            obj_1[n_ins] = np.min(objs[:, 0])  # Min -value1 (negated for minimization)
-            obj_2[n_ins] = np.min(objs[:, 1])  # Min -value2 (negated for minimization)
+        if objs.size > 0:
+            obj_1[n_ins] = np.min(objs[:, 0])  # remember: more negative is better
+            obj_2[n_ins] = np.min(objs[:, 1])
         final_list.append(objs.tolist())
-        
+
     return np.mean(obj_1), np.mean(obj_2)
 
 
