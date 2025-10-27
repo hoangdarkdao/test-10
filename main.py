@@ -28,7 +28,7 @@ task_map = {
 
 # Change variable here
 ALGORITHM_NAME = 'momcts'  # Could also be 'MEoH' or 'NSGA2'
-PROBLEM_NAME = "bi_kp" # Could also be "tsp_semo, bi_kp, bi_cvrp"
+PROBLEM_NAME = "bi_cvrp" # Could also be "tsp_semo, bi_kp, bi_cvrp"
 exact_log_dir_name = "v16" # must be unique here
 
 
